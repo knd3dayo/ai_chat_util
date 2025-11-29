@@ -7,3 +7,9 @@ tiktoken
 
 # For MCP
 fastmcp
+
+# For API
+fastapi
+
+# Microsoft Agent Framework
+agent-framework
