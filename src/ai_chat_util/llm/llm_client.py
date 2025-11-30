@@ -7,7 +7,7 @@ import tiktoken
 from openai import AsyncOpenAI, AsyncAzureOpenAI
 
 from ai_chat_util.llm.llm_config import LLMConfig
-from ai_chat_util.model import CompletionRequest, CompletionResponse, ChatRequestContext, ChatMessage, ChatContent
+from ai_chat_util.model import ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, ChatContent
 
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
@@ -15,17 +15,17 @@ logger = log_settings.getLogger(__name__)
 class LLMClient(ABC):
 
     llm_config: LLMConfig = LLMConfig()
-    chat_history: CompletionRequest = CompletionRequest()
+    chat_history: ChatHistory = ChatHistory()
     request_context: ChatRequestContext = ChatRequestContext()
 
     @abstractmethod
-    async def _chat_completion(self, **kwargs) ->  CompletionResponse:
+    async def _chat_completion(self, **kwargs) ->  ChatResponse:
         pass
 
     @classmethod
     def create_llm_client(
         cls, llm_config: LLMConfig, 
-        chat_history: CompletionRequest = CompletionRequest(), 
+        chat_history: ChatHistory = ChatHistory(), 
         request_context: ChatRequestContext = ChatRequestContext()
     ) -> 'LLMClient':
         if llm_config.llm_provider == "azure_openai":
@@ -46,7 +46,7 @@ class LLMClient(ABC):
         # token数を取得する
         return len(encoder.encode(input_text))
 
-    async def run_chat(self, chat_message: ChatMessage |None = None) -> CompletionResponse:
+    async def run_chat(self, chat_message: ChatMessage |None = None) -> ChatResponse:
         '''
         LLMに対してChatCompletionを実行する.
         引数として渡されたChatMessageの前処理を実施した上で、LLMに対してChatCompletionを実行する.
@@ -71,7 +71,7 @@ class LLMClient(ABC):
         preprocessed_messages = self.__preprocess_image_urls(preprocessed_messages, self.request_context)
 
         # LLMに対してChatCompletionを実行. messageごとにasyncioのタスクを作成して実行する
-        async def __process_message(message_num: int, message: ChatMessage) -> tuple[int, CompletionResponse]:
+        async def __process_message(message_num: int, message: ChatMessage) -> tuple[int, ChatResponse]:
             client = LLMClient.create_llm_client(
                 self.llm_config, chat_history=copy.deepcopy(self.chat_history), request_context=self.request_context)
             
@@ -79,7 +79,7 @@ class LLMClient(ABC):
             chat_response =  await client._chat_completion()
             return (message_num, chat_response)
             
-        chat_response_tuples: list[tuple[int, CompletionResponse]] = []
+        chat_response_tuples: list[tuple[int, ChatResponse]] = []
 
         tasks = [__process_message(i, message) for i, message in enumerate(preprocessed_messages)]
         async with asyncio.Semaphore(16):
@@ -105,7 +105,7 @@ class LLMClient(ABC):
         for preprocessed_message in preprocessed_messages:
             self.chat_history.add_message(preprocessed_message)
         response_message = ChatMessage(
-            role=CompletionRequest.assistant_role_name,
+            role=ChatHistory.assistant_role_name,
             content=[ChatContent(type="text", text=postprocessed_response.output)]
         )
         self.chat_history.add_message(response_message)
@@ -178,7 +178,7 @@ class LLMClient(ABC):
             split_contents = [ChatContent(type="text", text=f"{request_context.prompt_template_text}\n{split_text}")]
             for split_content in split_contents:
                 chat_message = ChatMessage(
-                    role=CompletionRequest.user_role_name,
+                    role=ChatHistory.user_role_name,
                     content=[split_content]
                 )
                 # textタイプ以外のcontentを追加する
@@ -247,9 +247,9 @@ class LLMClient(ABC):
 
     async def __postprocess_messages(
         self,
-        chat_responses: list[CompletionResponse],
+        chat_responses: list[ChatResponse],
         request_context: ChatRequestContext
-    ) -> CompletionResponse:
+    ) -> ChatResponse:
         '''
         request_contextの内容に従い、メッセージの後処理を実施する
         * split_modeがsplit_and_summarizeの場合、
@@ -271,7 +271,7 @@ class LLMClient(ABC):
             result_text = ""
             for i, chat_response in enumerate(chat_responses):
                 result_text += f"[answer_part_{i+1}]\n" + chat_response.output + "\n"
-            return CompletionResponse(output=result_text.strip())
+            return ChatResponse(output=result_text.strip())
         
         if not request_context.summarize_prompt_text:
             raise ValueError("summarize_prompt_text must be set when split_mode is 'split_and_summarize'")
@@ -287,14 +287,14 @@ class LLMClient(ABC):
         )
         client = LLMClient.create_llm_client(self.llm_config, request_context=request_context)
         message = ChatMessage(
-            role=CompletionRequest.user_role_name,
+            role=ChatHistory.user_role_name,
             content=[ChatContent(type="text", text=summmarize_request_text)]
         )
         summarize_response = await client.run_chat(message)
         return summarize_response
 
 class AzureOpenAIClient(LLMClient):
-    def __init__(self, llm_config: LLMConfig, chat_history: CompletionRequest = CompletionRequest(), request_context: ChatRequestContext = ChatRequestContext()):
+    def __init__(self, llm_config: LLMConfig, chat_history: ChatHistory = ChatHistory(), request_context: ChatRequestContext = ChatRequestContext()):
         if llm_config.base_url:
             self.client = AsyncAzureOpenAI(api_key=llm_config.api_key, base_url=llm_config.base_url)
         elif llm_config.api_version and llm_config.endpoint:
@@ -307,17 +307,17 @@ class AzureOpenAIClient(LLMClient):
         self.chat_history = chat_history
         self.request_context = request_context
 
-    async def _chat_completion(self, **kwargs) -> CompletionResponse:
+    async def _chat_completion(self, **kwargs) -> ChatResponse:
         
         response = await self.client.chat.completions.create(
             model=self.chat_history.model,
             messages=self.chat_history.messages,
         )
-        return CompletionResponse(output=response.choices[0].message.content or "")
+        return ChatResponse(output=response.choices[0].message.content or "")
 
 
 class OpenAIClient(LLMClient):
-    def __init__(self, llm_config: LLMConfig, chat_history: CompletionRequest = CompletionRequest(), request_context: ChatRequestContext = ChatRequestContext()):
+    def __init__(self, llm_config: LLMConfig, chat_history: ChatHistory = ChatHistory(), request_context: ChatRequestContext = ChatRequestContext()):
         if llm_config.base_url:
             self.client = AsyncOpenAI(api_key=llm_config.api_key, base_url=llm_config.base_url)
         else:
@@ -328,12 +328,12 @@ class OpenAIClient(LLMClient):
         self.chat_history = chat_history
         self.request_context = request_context
 
-    async def _chat_completion(self,  **kwargs) -> CompletionResponse:
+    async def _chat_completion(self,  **kwargs) -> ChatResponse:
         response = await self.client.chat.completions.create(
             model=self.chat_history.model,
             messages=self.chat_history.messages,
         )
-        return CompletionResponse(output=response.choices[0].message.content or "")
+        return ChatResponse(output=response.choices[0].message.content or "")
 
 if __name__ == "__main__":
     import sys
@@ -354,7 +354,7 @@ if __name__ == "__main__":
         client.request_context = request_context
 
         message = ChatMessage(
-            role=CompletionRequest.user_role_name,
+            role=ChatHistory.user_role_name,
             content=[ChatContent(type="text", text=input_text)]
         )
         response = await client.run_chat(message)

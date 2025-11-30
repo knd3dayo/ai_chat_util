@@ -28,7 +28,7 @@ class ChatRequestContext(BaseModel):
     # 分割モードがNone以外の場合は、各パートはこのプロンプトの指示に従うため、必ず設定すること。
     prompt_template_text: str = Field(default="", description="Prompt template text. Used when split mode is not 'None'. This text is prepended to each split message. When split mode is not 'None', this must be set to guide each part according to the prompt's instructions.")
 
-class CompletionRequest(BaseModel):
+class ChatHistory(BaseModel):
 
     messages: list[Any] = Field(default=[], description="List of chat messages in the conversation.")
     model: str = Field(default="gpt-4o", description="The model used for the chat conversation.")
@@ -96,7 +96,7 @@ class CompletionRequest(BaseModel):
         return user_messages
     
 
-class CompletionResponse(BaseModel):
+class ChatResponse(BaseModel):
     output: str = Field(default="", description="The output text from the chat model.")
     total_tokens: int = Field(default=0, description="The total number of tokens used in the chat interaction.")
     documents: Optional[list[dict]] = Field(default=None, description="List of documents retrieved during the chat interaction.")
