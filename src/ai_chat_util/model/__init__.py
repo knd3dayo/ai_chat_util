@@ -1,0 +1,159 @@
+from typing import Any, ClassVar
+from pydantic import BaseModel, Field
+from typing import Optional, Any
+import base64
+from typing import ClassVar, Optional, Any
+from pydantic import BaseModel, Field
+
+
+import ai_chat_util.log.log_settings as log_settings
+logger = log_settings.getLogger(__name__)
+
+class ChatRequestContext(BaseModel):
+
+    # split_mode
+    split_mode_name_none: ClassVar[str] = "none"
+    split_mode_name_normal: ClassVar[str] = "normal_split"
+    split_mode_name_split_and_summarize: ClassVar[str] = "split_and_summarize"
+
+    # メッセージを分割するモード。分割しない場合は"none"、通常分割は"normal_split"、分割して要約は"split_and_summarize"
+    split_mode: str = Field(default="none", description="Mode to split messages. 'none' for no split, 'normal_split' for normal split, 'split_and_summarize' for split and summarize.")
+    # メッセージ分割する文字数
+    split_message_length: int = Field(default=2000, description="Maximum character count for message splitting.")
+    # 複数画像URLがある場合に、1つのリクエストに含める最大画像数。分割しない場合は0を設定
+    max_images_per_request: int = Field(default=0, description="Maximum number of images to include in a single request. Set to 0 if not splitting.")
+    # SplitAndSummarizeモード時の要約用プロンプトテキスト
+    summarize_prompt_text: str = Field(default="Summarize the content concisely.", description="Prompt text for summarization in SplitAndSummarize mode.")
+    # プロンプトテンプレートテキスト. 分割モードがNone以外の場合に使用. 分割した各メッセージの前に付与する。
+    # 分割モードがNone以外の場合は、各パートはこのプロンプトの指示に従うため、必ず設定すること。
+    prompt_template_text: str = Field(default="", description="Prompt template text. Used when split mode is not 'None'. This text is prepended to each split message. When split mode is not 'None', this must be set to guide each part according to the prompt's instructions.")
+
+class CompletionRequest(BaseModel):
+
+    messages: list[Any] = Field(default=[], description="List of chat messages in the conversation.")
+    model: str = Field(default="gpt-4o", description="The model used for the chat conversation.")
+    
+    # option fields
+    temperature: Optional[float] = Field(default=0.7, description="Sampling temperature for the model.")
+    response_format: Optional[dict] = Field(default=None, description="Format of the response from the model.")
+    
+    user_role_name: ClassVar[str]  = "user"
+    assistant_role_name: ClassVar[str]  = "assistant"
+    system_role_name: ClassVar[str]  = "system"
+
+    def add_message(self, message: "ChatMessage") -> None:
+        """
+        Add a ChatMessage to the messages list.
+        
+        Args:
+            message (ChatMessage): The chat message to add.
+        """
+        self.messages.append(message)
+        logger.debug(f"Message added: {message.role}: {message.content}")
+
+    def get_last_message(self) -> Optional["ChatMessage"]:
+        """
+        Get the last ChatMessage in the messages list.
+        
+        Returns:
+            Optional[ChatMessage]: The last chat message or None if no messages exist.
+        """
+        if self.messages:
+            last_message = self.messages[-1]
+            logger.debug(f"Last message retrieved: {last_message}")
+            return last_message
+        else:
+            logger.debug("No messages found.")
+            return None
+
+    def update_last_message(self, message: "ChatMessage") -> None:
+        """
+        Update the last ChatMessage in the messages list.
+        
+        Args:
+            message (ChatMessage): The new chat message to replace the last one.
+        """
+        if self.messages:
+            self.messages[-1] = message
+            logger.debug(f"Last message updated to: {message.role}: {message.content}")
+        else:
+            logger.debug("No messages to update.")
+
+class CompletionResponse(BaseModel):
+    output: str = Field(default="", description="The output text from the chat model.")
+    total_tokens: int = Field(default=0, description="The total number of tokens used in the chat interaction.")
+    documents: Optional[list[dict]] = Field(default=None, description="List of documents retrieved during the chat interaction.")
+
+
+
+class ChatContent(BaseModel):
+    type: str = Field(default="text", description="The type of content (e.g., 'text', 'image_url').")
+    text: Optional[str] = Field(default=None, description="The text content, if type is 'text'.")
+    image_url: Optional[dict] = Field(default=None, description="The image URL content, if type is 'image_url'.")
+
+    @classmethod
+    def create_image_content_from_file(cls, role: str, content: str, image_path: str) -> 'ChatContent':
+        """
+        Create a ChatMessage with an image from a local file path.
+        
+        Args:
+            role (str): The role of the message sender (e.g., 'user', 'assistant').
+            content (str): The text content of the message.
+            image_path (str): The local file path to the image. 
+        Returns:
+            ChatMessage: The created chat message with image content.
+        # Convert local image path to data URL
+        """
+        with open(image_path, "rb") as image_file:
+            image_data = image_file.read()
+        # Encode the image data to base64
+        if isinstance(image_data, bytes):
+            image_data = base64.b64encode(image_data).decode('utf-8')
+        # Create the image URL in data URL format
+        mime_type = "image/jpeg"  # Assuming JPEG, adjust as necessary
+        image_url = f"data:{mime_type};base64,{image_data}"
+        chat_content = ChatContent(type="image_url", image_url={"url": image_url})
+        return chat_content
+
+
+class ChatMessage(BaseModel):
+    role: str = Field(default="user", description="The role of the message sender (e.g., 'user', 'assistant').")
+    content: list[ChatContent] = Field(default=[], description="The content of the message, which can be text or other types.")
+
+    def get_last_user_content(self) -> Optional[ChatContent]:
+        """
+        Get the last ChatContent in the content list.
+        
+        Returns:
+            Optional[ChatContent]: The last chat content or None if no content exists.
+        """
+        if self.content:
+            last_content = self.content[-1]
+            logger.debug(f"Last content retrieved: {last_content}")
+            return last_content
+        else:
+            logger.debug("No content found.")
+            return None
+    
+    def add_content(self, chat_content: ChatContent) -> None:
+        """
+        Add a ChatContent to the content list.
+        
+        Args:
+            chat_content (ChatContent): The chat content to add.
+        """
+        self.content.append(chat_content)
+        logger.debug(f"Content added: {chat_content}")
+
+    def update_last_content(self, chat_content: ChatContent) -> None:
+        """
+        Update the last ChatContent in the content list.
+        
+        Args:
+            chat_content (ChatContent): The new chat content to replace the last one.
+        """
+        if self.content:
+            self.content[-1] = chat_content
+            logger.debug(f"Last content updated to: {chat_content}")
+        else:
+            logger.debug("No content to update.")

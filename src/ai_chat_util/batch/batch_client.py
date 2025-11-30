@@ -28,7 +28,7 @@ class LLMBatchClient:
         messages = [
             {"role": "user", "content": content}
         ]
-        response = await self.client.chat_completion(messages=messages)
+        response = await self.client._chat_completion(messages=messages)
         progress.update(1)  # Update progress after processing the row
         return (row_num, input_message, response.output)
 

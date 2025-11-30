@@ -170,7 +170,7 @@ class MSAIAgentFactory(BaseModel):
         tool = MCPStdioTool(
             name="mcp_server",
             command="uv",
-            args=["run", "-m", "mermaid_workflow.tool.mcp_server"],
+            args=["run", "-m", "ai_chat_util.tool.mcp_server"],
             env=os.environ.copy(),
             description="MCP server tools for file operations",
         )
