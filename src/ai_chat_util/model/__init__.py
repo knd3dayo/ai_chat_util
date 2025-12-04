@@ -152,7 +152,7 @@ class ChatContent(BaseModel):
         image_data = base64.b64encode(image_data).decode('utf-8')
         mime_type = "image/jpeg"  # Adjust as needed
         image_url = f"data:{mime_type};base64,{image_data}"
-        return cls(type="image_url", image_url={"url": image_url}, extra=extra)
+        return cls(type="image_url", image_url={"url": image_url}, **extra)
 
 
 class ChatMessage(BaseModel):

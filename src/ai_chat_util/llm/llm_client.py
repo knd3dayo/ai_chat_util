@@ -4,6 +4,7 @@ from typing import Any
 from abc import ABC, abstractmethod
 import copy
 import tiktoken
+import asyncio
 
 from openai import AsyncOpenAI, AsyncAzureOpenAI
 
@@ -17,7 +18,6 @@ class LLMClient(ABC):
 
     llm_config: LLMConfig = LLMConfig()
     chat_history: ChatHistory = ChatHistory()
-    request_context: ChatRequestContext = ChatRequestContext()
 
     @abstractmethod
     async def _chat_completion(self, **kwargs) ->  ChatResponse:
@@ -47,7 +47,33 @@ class LLMClient(ABC):
         # token数を取得する
         return len(encoder.encode(input_text))
 
-    async def run_chat(self, chat_message_list: list[ChatMessage], **kwargs) -> ChatResponse:
+    async def run_chat(self, chat_message_list: list[ChatMessage], request_context: ChatRequestContext|None = None, **kwargs) -> ChatResponse:
+        '''
+        LLMに対してChatCompletionを実行する.
+        引数として渡されたChatMessageの前処理を実施した上で、LLMに対してChatCompletionを実行する.
+        その後、後処理を実施し、CompletionResponseを返す.
+        chat_messageがNoneの場合は、chat_historyから最後のユーザーメッセージを取得して処理を実施する.
+
+        Args:
+            chat_message (ChatMessage): チャットメッセージ
+        Returns:
+            CompletionResponse: LLMからの応答
+        '''
+        if request_context:
+            return await self.run_chat_with_request_context(
+                chat_message_list, request_context, **kwargs
+            )
+        else:
+            for chat_message in chat_message_list:
+                self.chat_history.add_message(chat_message)
+            chat_response =  await self._chat_completion(**kwargs)
+            self.chat_history.add_message(ChatMessage(
+                role=ChatHistory.assistant_role_name,
+                content=[ChatContent(type="text", text=chat_response.output)]
+            ))
+            return chat_response
+
+    async def run_chat_with_request_context(self, chat_message_list: list[ChatMessage], request_context: ChatRequestContext, **kwargs) -> ChatResponse:
         '''
         LLMに対してChatCompletionを実行する.
         引数として渡されたChatMessageの前処理を実施した上で、LLMに対してChatCompletionを実行する.
@@ -66,15 +92,15 @@ class LLMClient(ABC):
         else:
             chat_messages = chat_message_list
 
-             # 前処理を実行
+        # 前処理を実行
         preprocessed_messages: list[ChatMessage] = chat_messages
-        preprocessed_messages = self.__preprocess_text_message(preprocessed_messages, self.request_context)
-        preprocessed_messages = self.__preprocess_image_urls(preprocessed_messages, self.request_context)
+        preprocessed_messages = self.__preprocess_text_message(preprocessed_messages, request_context)
+        preprocessed_messages = self.__preprocess_image_urls(preprocessed_messages, request_context)
 
         # LLMに対してChatCompletionを実行. messageごとにasyncioのタスクを作成して実行する
         async def __process_message(message_num: int, message: ChatMessage) -> tuple[int, ChatResponse]:
             client = LLMClient.create_llm_client(
-                self.llm_config, chat_history=copy.deepcopy(self.chat_history), request_context=self.request_context)
+                self.llm_config, chat_history=copy.deepcopy(self.chat_history), request_context=request_context)
             
             client.chat_history.add_message(message)
             chat_response =  await client._chat_completion(**kwargs)
@@ -93,14 +119,14 @@ class LLMClient(ABC):
         for preprocessed_message in preprocessed_messages:
             # 
             client = LLMClient.create_llm_client(
-                self.llm_config, chat_history=copy.deepcopy(self.chat_history), request_context=self.request_context)
+                self.llm_config, chat_history=copy.deepcopy(self.chat_history), request_context=request_context)
             
             client.chat_history.add_message(preprocessed_message)
             chat_response =  await client._chat_completion(**kwargs)
             chat_responses.append(chat_response)
 
         # 後処理を実行
-        postprocessed_response = await self.__postprocess_messages(chat_responses, self.request_context)
+        postprocessed_response = await self.__postprocess_messages(chat_responses, request_context)
 
         # chat_historyにpreprocessed_messageとpostprocessed_responseを追加する
         for preprocessed_message in preprocessed_messages:
@@ -354,16 +380,14 @@ if __name__ == "__main__":
         request_context.split_mode = ChatRequestContext.split_mode_name_split_and_summarize
         request_context.split_message_length = 1000
         request_context.prompt_template_text = promt_template_text
-        client.request_context = request_context
 
         message = ChatMessage(
             role=ChatHistory.user_role_name,
             content=[ChatContent(type="text", text=input_text)]
         )
-        response = await client.run_chat([message])
+        response = await client.run_chat([message], request_context=request_context)
         print(response.output)
 
 
 
-    import asyncio
     asyncio.run(main())
