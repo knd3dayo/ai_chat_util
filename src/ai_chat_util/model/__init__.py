@@ -127,6 +127,16 @@ class ChatContent(BaseModel):
                 base[k] = v
         return base
 
+    def add_extra(self, key: str, value: Any) -> None:
+        """
+        Add an extra key-value pair to the extra dictionary.
+        
+        Args:
+            key (str): The key for the extra data.
+            value (Any): The value for the extra data.
+        """
+        self.extra[key] = value
+
     @classmethod
     def create_image_content_from_file(cls, image_path: str, **extra) -> 'ChatContent':
         """
@@ -148,6 +158,24 @@ class ChatContent(BaseModel):
 class ChatMessage(BaseModel):
     role: str = Field(default="user", description="The role of the message sender (e.g., 'user', 'assistant').")
     content: list[ChatContent] = Field(default=[], description="The content of the message, which can be text or other types.")
+    extra: dict[str, Any] = Field(default_factory=dict, description="Additional arbitrary arguments for ChatMessage.")
+
+    def model_dump(self, *args, **kwargs) -> dict:
+        base = super().model_dump(*args, **kwargs)
+        for k, v in self.extra.items():
+            if k not in base:
+                base[k] = v
+        return base
+
+    def add_extra(self, key: str, value: Any) -> None:
+        """
+        Add an extra key-value pair to the extra dictionary.
+        
+        Args:
+            key (str): The key for the extra data.
+            value (Any): The value for the extra data.
+        """
+        self.extra[key] = value
 
     def get_last_user_content(self) -> Optional[ChatContent]:
         """
