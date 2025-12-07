@@ -1,7 +1,6 @@
 from typing import Any, ClassVar
 from pydantic import BaseModel, Field
 from typing import Optional, Any
-import base64
 from typing import ClassVar, Optional, Any
 from pydantic import BaseModel, Field
 
@@ -136,23 +135,6 @@ class ChatContent(BaseModel):
             value (Any): The value for the extra data.
         """
         self.extra[key] = value
-
-    @classmethod
-    def create_image_content_from_file(cls, image_path: str, **extra) -> 'ChatContent':
-        """
-        Create a ChatContent with an image from a local file path.
-        Args:
-            image_path (str): The local file path to the image.
-            **extra: Arbitrary keyword arguments to include.
-        Returns:
-            ChatContent: The created chat content with image data.
-        """
-        with open(image_path, "rb") as image_file:
-            image_data = image_file.read()
-        image_data = base64.b64encode(image_data).decode('utf-8')
-        mime_type = "image/jpeg"  # Adjust as needed
-        image_url = f"data:{mime_type};base64,{image_data}"
-        return cls(type="image_url", image_url={"url": image_url}, **extra)
 
 
 class ChatMessage(BaseModel):

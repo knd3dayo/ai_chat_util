@@ -2,14 +2,16 @@
 from typing import Any
 # 抽象クラス
 from abc import ABC, abstractmethod
+import os
 import copy
 import tiktoken
 import asyncio
+import base64
 
 from openai import AsyncOpenAI, AsyncAzureOpenAI
 
 from ai_chat_util.llm.llm_config import LLMConfig
-from ai_chat_util.model import ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, ChatContent
+from ai_chat_util.llm.model import ChatHistory, ChatResponse, ChatRequestContext, ChatMessage, ChatContent
 
 import ai_chat_util.log.log_settings as log_settings
 logger = log_settings.getLogger(__name__)
@@ -22,6 +24,20 @@ class LLMClient(ABC):
     @abstractmethod
     async def _chat_completion(self, **kwargs) ->  ChatResponse:
         pass
+    
+    @abstractmethod
+    def _create_image_content_from_file(self, file_path: str) -> ChatContent:
+        pass
+
+    @abstractmethod
+    def _create_pdf_content_from_file(self, file_path: str) -> ChatContent:
+        pass
+
+    def create_image_content_from_file(self, file_path: str) -> ChatContent:
+        return self._create_image_content_from_file(file_path)
+
+    def create_pdf_content_from_file(self, file_path: str) -> ChatContent:
+        return self._create_pdf_content_from_file(file_path)
 
     @classmethod
     def create_llm_client(
@@ -47,7 +63,7 @@ class LLMClient(ABC):
         # token数を取得する
         return len(encoder.encode(input_text))
 
-    async def run_chat(self, chat_message_list: list[ChatMessage], request_context: ChatRequestContext|None = None, **kwargs) -> ChatResponse:
+    async def run_chat(self, chat_message_list: list[ChatMessage] = [], request_context: ChatRequestContext|None = None, **kwargs) -> ChatResponse:
         '''
         LLMに対してChatCompletionを実行する.
         引数として渡されたChatMessageの前処理を実施した上で、LLMに対してChatCompletionを実行する.
@@ -64,14 +80,37 @@ class LLMClient(ABC):
                 chat_message_list, request_context, **kwargs
             )
         else:
-            for chat_message in chat_message_list:
-                self.chat_history.add_message(chat_message)
-            chat_response =  await self._chat_completion(**kwargs)
-            self.chat_history.add_message(ChatMessage(
-                role=ChatHistory.assistant_role_name,
-                content=[ChatContent(type="text", text=chat_response.output)]
-            ))
-            return chat_response
+            return await self.run_normal_chat(
+                chat_message_list, **kwargs
+            )   
+
+    async def run_normal_chat(self, chat_message_list: list[ChatMessage] = [], **kwargs) -> ChatResponse:
+        '''
+        LLMに対してChatCompletionを実行する.
+        引数として渡されたChatMessageをそのままLLMに対してChatCompletionを実行する.
+        その後、CompletionResponseを返す.
+        chat_messageがNoneの場合は、chat_historyから最後のユーザーメッセージを取得して処理を実施する.
+
+        Args:
+            chat_message (ChatMessage): チャットメッセージ
+        Returns:
+            CompletionResponse: LLMからの応答
+        '''
+        if len(chat_message_list) == 0:
+            chat_messages = self.chat_history.get_last_user_messages()
+            if len(chat_messages) == 0:
+                raise ValueError("No chat messages to process.")
+        else:
+            chat_messages = chat_message_list
+
+        for chat_message in chat_messages:
+            self.chat_history.add_message(chat_message)
+        chat_response =  await self._chat_completion(**kwargs)
+        self.chat_history.add_message(ChatMessage(
+            role=ChatHistory.assistant_role_name,
+            content=[ChatContent(type="text", text=chat_response.output)]
+        ))
+        return chat_response
 
     async def run_chat_with_request_context(self, chat_message_list: list[ChatMessage], request_context: ChatRequestContext, **kwargs) -> ChatResponse:
         '''
@@ -343,6 +382,11 @@ class AzureOpenAIClient(LLMClient):
         )
         return ChatResponse(output=response.choices[0].message.content or "")
 
+    def _create_image_content_from_file(self, file_path: str) -> ChatContent:
+        return LLMClieuntUtil.openai_create_image_content_from_file(file_path)
+    
+    def _create_pdf_content_from_file(self, file_path: str) -> ChatContent:
+        return LLMClieuntUtil.openai_create_pdf_content_from_file(file_path)
 
 class OpenAIClient(LLMClient):
     def __init__(self, llm_config: LLMConfig, chat_history: ChatHistory = ChatHistory(), request_context: ChatRequestContext = ChatRequestContext()):
@@ -363,6 +407,48 @@ class OpenAIClient(LLMClient):
             **kwargs
         )
         return ChatResponse(output=response.choices[0].message.content or "")
+
+    def _create_image_content_from_file(self, file_path: str) -> ChatContent:
+        return LLMClieuntUtil.openai_create_image_content_from_file(file_path)
+    
+    def _create_pdf_content_from_file(self, file_path: str) -> ChatContent:
+        return LLMClieuntUtil.openai_create_pdf_content_from_file(file_path)
+
+class LLMClieuntUtil:
+    @classmethod
+    def openai_create_image_content_from_file(cls, image_path: str, **extra) -> 'ChatContent':
+        """
+        Create a ChatContent with an image from a local file path.
+        Args:
+            image_path (str): The local file path to the image.
+            **extra: Arbitrary keyword arguments to include.
+        Returns:
+            ChatContent: The created chat content with image data.
+        """
+        with open(image_path, "rb") as image_file:
+            image_data = image_file.read()
+        image_data = base64.b64encode(image_data).decode('utf-8')
+        mime_type = "image/jpeg"  # Adjust as needed
+        image_url = f"data:{mime_type};base64,{image_data}"
+        return ChatContent(type="image_url", image_url={"url": image_url}, **extra)
+
+    @classmethod
+    def openai_create_pdf_content_from_file(cls, pdf_path: str) -> 'ChatContent':
+        """
+        Create a ChatContent with an image from a local file path.
+        Args:
+            pdf_path (str): The local file path to the PDF.
+            **extra: Arbitrary keyword arguments to include.
+        Returns:
+            ChatContent: The created chat content with PDF data.
+        """
+        with open(pdf_path, "rb") as pdf_file:
+            pdf_data = pdf_file.read()
+        pdf_data = base64.b64encode(pdf_data).decode('utf-8')
+        extra = {
+            "file": {"url": pdf_data, "filename": os.path.basename(pdf_path)}
+            }
+        return ChatContent(type="file", extra=extra)
 
 if __name__ == "__main__":
     import sys

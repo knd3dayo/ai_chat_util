@@ -6,21 +6,23 @@ from dotenv import load_dotenv
 import argparse
 from fastmcp import FastMCP
 from pydantic import Field
-from ai_chat_util.chat.chat_util import ChatUtil,  ChatRequestContext
-from ai_chat_util.llm.model import CompletionRequest, CompletionResponse
+from ai_chat_util.llm.model import ChatRequestContext, ChatHistory, ChatResponse
+from ai_chat_util.llm.llm_client import LLMClient
+from ai_chat_util.llm.llm_config import LLMConfig
 
 mcp = FastMCP("ai_chat_mcp") #type :ignore
 
 # toolは実行時にmcp.tool()で登録する。@mcp.toolは使用しない。
 # chat_utilのrun_openai_chat_asyncを呼び出すラッパー関数を定義
 async def run_openai_chat_async_mcp(
-    completion_request: Annotated[CompletionRequest, Field(description="Completion request object")],
+    completion_request: Annotated[ChatHistory, Field(description="Completion request object")],
     request_context: Annotated[ChatRequestContext, Field(description="Chat request context")]    
-) -> Annotated[CompletionResponse, Field(description="List of related articles from Wikipedia")]:
+) -> Annotated[ChatResponse, Field(description="List of related articles from Wikipedia")]:
     """
     This function searches Wikipedia with the specified keywords and returns related articles.
     """
-    return await ChatUtil.run_openai_chat_async(completion_request, request_context )
+    client = LLMClient.create_llm_client(LLMConfig(), completion_request, request_context)
+    return await client.run_chat()
 
 # 引数解析用の関数
 def parse_args() -> argparse.Namespace:
