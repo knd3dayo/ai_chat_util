@@ -13,3 +13,6 @@ fastapi
 
 # Microsoft Agent Framework
 agent-framework
+
+# For PDF processing
+PyMuPDF

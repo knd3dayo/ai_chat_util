@@ -22,7 +22,7 @@ class LLMClient(ABC):
     chat_history: ChatHistory = ChatHistory()
 
     @abstractmethod
-    async def _chat_completion(self, **kwargs) ->  ChatResponse:
+    async def _chat_completion_(self, **kwargs) ->  ChatResponse:
         pass
 
     @abstractmethod
@@ -164,7 +164,7 @@ class LLMClient(ABC):
 
         for chat_message in chat_messages:
             self.chat_history.add_message(chat_message)
-        chat_response =  await self._chat_completion(**kwargs)
+        chat_response =  await self._chat_completion_(**kwargs)
         text_content = self.create_text_content(chat_response.output)
         self.chat_history.add_message(ChatMessage(
             role=ChatHistory.assistant_role_name,
@@ -202,7 +202,7 @@ class LLMClient(ABC):
                 self.llm_config, chat_history=copy.deepcopy(self.chat_history), request_context=request_context)
             
             client.chat_history.add_message(message)
-            chat_response =  await client._chat_completion(**kwargs)
+            chat_response =  await client._chat_completion_(**kwargs)
             return (message_num, chat_response)
             
         chat_response_tuples: list[tuple[int, ChatResponse]] = []
@@ -221,7 +221,7 @@ class LLMClient(ABC):
                 self.llm_config, chat_history=copy.deepcopy(self.chat_history), request_context=request_context)
             
             client.chat_history.add_message(preprocessed_message)
-            chat_response =  await client._chat_completion(**kwargs)
+            chat_response =  await client._chat_completion_(**kwargs)
             chat_responses.append(chat_response)
 
         # 後処理を実行
@@ -432,16 +432,17 @@ class OpenAIClient(LLMClient):
         self.chat_history = chat_history
         self.request_context = request_context
 
-    async def _chat_completion(self,  **kwargs) -> ChatResponse:
+    async def _chat_completion_(self,  **kwargs) -> ChatResponse:
+        message_dict_list = [msg.model_dump() for msg in self.chat_history.messages]
         response = await self.client.chat.completions.create(
             model=self.chat_history.model,
-            messages=self.chat_history.messages,
+            messages=message_dict_list,
             **kwargs
         )
         return ChatResponse(output=response.choices[0].message.content or "")
 
     def _create_image_content_from_url_(self, image_url: str) -> "ChatContent":
-        params = {"type": "image_url", "image_url": image_url}
+        params = {"type": "image_url", "image_url": {"url": image_url}}
         return ChatContent(params=params)
     
     def _create_image_content_from_bytes_(self, image_data: bytes) -> "ChatContent":
@@ -473,42 +474,58 @@ class AzureOpenAIClient(OpenAIClient):
         self.chat_history = chat_history
         self.request_context = request_context
 
-    async def _chat_completion(self, **kwargs) -> ChatResponse:
+    async def _chat_completion_(self, **kwargs) -> ChatResponse:
         
+        message_dict_list = [msg.model_dump() for msg in self.chat_history.messages]
         response = await self.client.chat.completions.create(
             model=self.chat_history.model,
-            messages=self.chat_history.messages,
+            messages=message_dict_list,
             **kwargs
         )
         return ChatResponse(output=response.choices[0].message.content or "")
 
+    # Azureの場合は、CompletionでのPDF処理が未対応の模様。PDFファイルからテキストと画像を抽出して、
+    # 生成AIに渡すという独自実装を行う。
+    async def analyze_pdf_files(self, pdf_path_list: list[str], prompt: str) -> str:
+        import ai_chat_util.util.pdf_util as pdf_util
+        prompt_content = self.create_text_content(text=prompt)
+        pdf_messages = []
+        for pdf_path in pdf_path_list:
+            # PDFからテキストと画像を抽出
+            pdf_elements = pdf_util.extract_pdf_content(pdf_path)
+            pdf_contents = []
+            for element in pdf_elements:
+                if element["type"] == "text":
+                    text_content = self.create_text_content(text=element["text"])
+                    pdf_contents.append(text_content)
+                elif element["type"] == "image_url":
+                    image_content = self.create_image_content_from_url(element["image_url"])
+                    pdf_contents.append(image_content)
+
+            page_info_content = self.create_text_content(text=f"PDFファイル: {os.path.basename(pdf_path)} の内容を以下に示します。")
+            pdf_messages.append(ChatMessage(
+                role=ChatHistory.user_role_name,
+                content=[page_info_content] + pdf_contents
+            ))
+        chat_message = ChatMessage(role="user", content=[prompt_content])
+        response: ChatResponse = await self.run_chat([chat_message] + pdf_messages,  request_context=None)
+        return response.output
 
 
 if __name__ == "__main__":
     import sys
-    input_text = "こんにちは、AIチャットユーティリティのテストコードです。"
-    promt_template_text = "以下の文章に基づいて回答してください。"
-    if len(sys.argv) > 1:
-        with open(sys.argv[1], "r", encoding="utf-8") as f:
-            input_text = f.read()
-        promt_template_text = "以下の文章を要約してください。"
-
+    # 画像ファイルを指定して、画像分析を行う
     async def main():
-        # テストコード
-        client = LLMClient.create_llm_client(llm_config=LLMConfig())
-        request_context = ChatRequestContext()
-        request_context.split_mode = ChatRequestContext.split_mode_name_split_and_summarize
-        request_context.split_message_length = 1000
-        request_context.prompt_template_text = promt_template_text
+        llm_config = LLMConfig()
+        llm_client = LLMClient.create_llm_client(llm_config)
 
-        text_content = client.create_text_content(input_text)
-        message = ChatMessage(
-            role=ChatHistory.user_role_name,
-            content=[text_content]
-        )
-        response = await client.run_chat([message], request_context=request_context)
-        print(response.output)
+        image_paths = sys.argv[1:]
+        prompt = "上記のPDFに関して、内容を説明してください。また、画像に含まれるテキストを抽出してください。"
 
+        response_text = await llm_client.analyze_pdf_files(image_paths, prompt)
+        print("=== Response ===")
+        print(response_text)
 
 
     asyncio.run(main())
+    

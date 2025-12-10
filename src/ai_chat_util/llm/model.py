@@ -104,17 +104,28 @@ class ChatResponse(BaseModel):
 
 
 
-from typing import Dict, Any
+from typing import Any
 
-class ChatContent:
-    def __init__(self, params: dict[str, Any]):
-        self.params = params
+class ChatContent(BaseModel):
+    params: dict[str, Any] = Field(default={}, description="Parameters of the chat content.")
+    def model_dump(self, *args, **kwargs):
+            base = super().model_dump(*args, **kwargs)
+            # paramsを展開
+            return {**{k: v for k, v in base.items() if k != "params"}, **self.params}
 
 
 class ChatMessage(BaseModel):
     role: str = Field(default="user", description="The role of the message sender (e.g., 'user', 'assistant').")
     content: list[ChatContent] = Field(default=[], description="The content of the message, which can be text or other types.")
 
+    # model_dump をオーバーライドして content を展開する
+    def model_dump(self, *args, **kwargs):
+        base = super().model_dump(*args, **kwargs)
+        # baseからcontentを除去
+        del base["content"]
+
+        # contentを展開
+        return {**{k: v for k, v in base.items() if k != "content"}, **{"content": [c.model_dump() for c in self.content]}}
 
     def get_last_user_content(self) -> Optional[ChatContent]:
         """
