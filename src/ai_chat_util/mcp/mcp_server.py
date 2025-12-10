@@ -20,7 +20,7 @@ async def run_chat_mcp(
     This function searches Wikipedia with the specified keywords and returns related articles.
     """
     client = LLMClient.create_llm_client(LLMConfig(), completion_request, request_context)
-    return await client.run_chat()
+    return await client.chat()
 
 
 # 複数の画像の分析を行う

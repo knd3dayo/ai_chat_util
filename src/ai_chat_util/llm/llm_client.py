@@ -104,7 +104,7 @@ class LLMClient(ABC):
             image_content_list.append(image_content)
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + image_content_list)
-        chat_response: ChatResponse = await self.run_chat([chat_message],  request_context=None)
+        chat_response: ChatResponse = await self.chat([chat_message],  request_context=None)
         return chat_response.output
 
 
@@ -119,10 +119,67 @@ class LLMClient(ABC):
             pdf_content_list.append(pdf_content)
 
         chat_message = ChatMessage(role="user", content=[prompt_content] + pdf_content_list)
-        chat_response: ChatResponse = await self.run_chat([chat_message],  request_context=None)
+        chat_response: ChatResponse = await self.chat([chat_message],  request_context=None)
         return chat_response.output
 
-    async def run_chat(self, chat_message_list: list[ChatMessage] = [], request_context: ChatRequestContext|None = None, **kwargs) -> ChatResponse:
+    async def simple_image_analysis(self, image_path: str, prompt: str) -> ChatResponse:
+        '''
+        簡易的な画像解析を実行する.
+        引数として渡された画像ファイルパスとプロンプトをChatMessageに変換し、LLMに対してChatCompletionを実行する.
+        その後、CompletionResponseを返す.
+
+        Args:
+            image_path (str): 画像ファイルのパス
+            prompt (str): プロンプト文字列
+        Returns:
+            CompletionResponse: LLMからの応答
+        '''
+        prompt_content = self.create_text_content(text=prompt)
+        image_content = self.create_image_content_from_file(image_path)
+        chat_message = ChatMessage(
+            role=ChatHistory.user_role_name,
+            content=[prompt_content, image_content]
+        )
+        return await self.chat([chat_message], request_context=None)
+
+    async def simple_pdf_analysis(self, pdf_path: str, prompt: str) -> ChatResponse:
+        '''
+        簡易的なPDF解析を実行する.
+        引数として渡されたPDFファイルパスとプロンプトをChatMessageに変換し、LLMに対してChatCompletionを実行する.
+        その後、CompletionResponseを返す.
+
+        Args:
+            pdf_path (str): PDFファイルのパス
+            prompt (str): プロンプト文字列
+        Returns:
+            CompletionResponse: LLMからの応答
+        '''
+        prompt_content = self.create_text_content(text=prompt)
+        pdf_content = self.create_pdf_content_from_file(pdf_path)
+        chat_message = ChatMessage(
+            role=ChatHistory.user_role_name,
+            content=[prompt_content, pdf_content]
+        )
+        return await self.chat([chat_message], request_context=None)
+
+    async def simple_chat(self, prompt: str) -> ChatResponse:
+        '''
+        簡易的なChatCompletionを実行する.
+        引数として渡されたプロンプトをChatMessageに変換し、LLMに対してChatCompletionを実行する.
+        その後、CompletionResponseを返す.
+
+        Args:
+            prompt (str): プロンプト文字列
+        Returns:
+            CompletionResponse: LLMからの応答
+        '''
+        chat_message = ChatMessage(
+            role=ChatHistory.user_role_name,
+            content=[self.create_text_content(prompt)]
+        )
+        return await self.chat([chat_message], request_context=None)
+
+    async def chat(self, chat_message_list: list[ChatMessage] = [], request_context: ChatRequestContext|None = None, **kwargs) -> ChatResponse:
         '''
         LLMに対してChatCompletionを実行する.
         引数として渡されたChatMessageの前処理を実施した上で、LLMに対してChatCompletionを実行する.
@@ -135,15 +192,15 @@ class LLMClient(ABC):
             CompletionResponse: LLMからの応答
         '''
         if request_context:
-            return await self.run_chat_with_request_context(
+            return await self.__chat_with_request_context__(
                 chat_message_list, request_context, **kwargs
             )
         else:
-            return await self.run_normal_chat(
+            return await self.__normal_chat__(
                 chat_message_list, **kwargs
             )   
 
-    async def run_normal_chat(self, chat_message_list: list[ChatMessage] = [], **kwargs) -> ChatResponse:
+    async def __normal_chat__(self, chat_message_list: list[ChatMessage] = [], **kwargs) -> ChatResponse:
         '''
         LLMに対してChatCompletionを実行する.
         引数として渡されたChatMessageをそのままLLMに対してChatCompletionを実行する.
@@ -172,7 +229,7 @@ class LLMClient(ABC):
         ))
         return chat_response
 
-    async def run_chat_with_request_context(self, chat_message_list: list[ChatMessage], request_context: ChatRequestContext, **kwargs) -> ChatResponse:
+    async def __chat_with_request_context__(self, chat_message_list: list[ChatMessage], request_context: ChatRequestContext, **kwargs) -> ChatResponse:
         '''
         LLMに対してChatCompletionを実行する.
         引数として渡されたChatMessageの前処理を実施した上で、LLMに対してChatCompletionを実行する.
@@ -416,7 +473,7 @@ class LLMClient(ABC):
             role=ChatHistory.user_role_name,
             content=[text_content]
         )
-        summarize_response = await client.run_chat([message])
+        summarize_response = await client.chat([message])
         return summarize_response
 
 
@@ -508,7 +565,7 @@ class AzureOpenAIClient(OpenAIClient):
                 content=[page_info_content] + pdf_contents
             ))
         chat_message = ChatMessage(role="user", content=[prompt_content])
-        response: ChatResponse = await self.run_chat([chat_message] + pdf_messages,  request_context=None)
+        response: ChatResponse = await self.chat([chat_message] + pdf_messages,  request_context=None)
         return response.output
 
 
@@ -528,4 +585,3 @@ if __name__ == "__main__":
 
 
     asyncio.run(main())
-    

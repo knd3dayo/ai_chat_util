@@ -11,7 +11,7 @@ class LLMBatchClient:
         self.client = client
 
 
-    async def __process_row(self, row_num: int, prompt: str, input_message: str, agent_mode, progress: tqdm_asyncio) -> tuple[int, str, str]:
+    async def _process_row_(self, row_num: int, prompt: str, input_message: str, agent_mode, progress: tqdm_asyncio) -> tuple[int, str, str]:
         content = f"{prompt}\n{input_message}"
         if agent_mode:
             agent_util = MSAIAgentFactory(llm_config=self.client.llm_config)
@@ -28,7 +28,7 @@ class LLMBatchClient:
         progress.update(1)  # Update progress after processing the row
         return (row_num, input_message, response.output)
 
-    async def batch_chat_completion(self, prompt:str, messages: list[str], agent_mode) -> list[str]:
+    async def run(self, prompt:str, messages: list[str], agent_mode) -> list[str]:
 
         progress = tqdm_asyncio(total=len(messages), desc="progress")
         # 進捗バーのフォーマット
@@ -38,7 +38,7 @@ class LLMBatchClient:
         responses = []
 
         async with asyncio.Semaphore(5):
-            tasks = [self.__process_row(i, prompt, messages, agent_mode, progress) for i, messages in enumerate(messages)]
+            tasks = [self._process_row_(i, prompt, messages, agent_mode, progress) for i, messages in enumerate(messages)]
             responses = await asyncio.gather(*tasks)
             progress.close()
     
@@ -64,7 +64,7 @@ if __name__ == "__main__":
             "中国語"
         ]
 
-        results = await batch_client.batch_chat_completion(prompt, messages, agent_mode)
+        results = await batch_client.run(prompt, messages, agent_mode)
 
         for i, res in enumerate(results):
             print(f"Prompt {i+1}: {res}")
